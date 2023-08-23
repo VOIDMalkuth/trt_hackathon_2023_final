@@ -1,0 +1,8 @@
+tensorrt_llm_july-release-v1/build/
+tensorrt_llm_july-release-v1/tensorrt_llm.egg-info/
+tensorrt_llm_july-release-v1/cpp/build/
+tensorrt_llm_july-release-v1/tensorrt_llm/libs
+tensorrt_llm_july-release-v1/3rdparty/cutlass
+
+*.so
+*.tar.gz
