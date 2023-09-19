@@ -6,3 +6,5 @@ tensorrt_llm_july-release-v1/3rdparty/cutlass
 
 *.so
 *.tar.gz
+*.pyc
+__pycache__
