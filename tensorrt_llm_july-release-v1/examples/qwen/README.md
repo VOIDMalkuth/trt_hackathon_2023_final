@@ -17,7 +17,19 @@ Then run script with `python run_original.py`.
 ```bash
 # under tensorrt_llm_july-release-v1/examples/qwen
 # make sure Qwen-7B folder exists with weight
-python build.py
+python build.py --use-fp16
+```
+
+To use int8 weight only quant:
+
+```bash
+python build.py --use-int8-weightonly
+```
+
+To use int4 weight only quant:
+
+```bash
+python build.py --use-int4-weightonly
 ```
 
 ### Run Qwen-7B with TRT engine

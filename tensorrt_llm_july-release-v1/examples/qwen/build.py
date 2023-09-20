@@ -246,7 +246,7 @@ def build(rank, configs):
 class QwenConfig(object):
 
     def __init__(self):
-        self.builder_opt = 3
+        self.builder_opt = 5
         self.dtype = "float16"
         self.enable_debug_output = False
         self.gpus_per_node = 1
@@ -269,16 +269,43 @@ class QwenConfig(object):
         self.timing_cache = True
         self.use_gemm_plugin = "float16"
         self.use_gpt_attention_plugin = "float16"
-        self.use_weight_only = False # need extra work to handle weight
+        self.use_weight_only = False
         self.weight_only_precision = 'int8'
         self.visualize = False
         self.vocab_size = 151936
         self.hidden_act = "silu"
         self.world_size = 1
         self.load_weight = True
-        
+
+class QwenConfigWeightOnlyInt8(QwenConfig):
+    def __init__(self):
+        super().__init__()
+        self.use_weight_only = True
+        self.weight_only_precision = 'int8'
+
+class QwenConfigWeightOnlyInt4(QwenConfig):
+    def __init__(self):
+        super().__init__()
+        self.use_weight_only = True
+        self.weight_only_precision = 'int4'
+
 if __name__ == "__main__":
-    config = QwenConfig()
+    import sys
+
+    if len(sys.argv) != 2:
+        print("Usage: python build.py --use-fp16/--use-int8-weightonly/--use-int4-weightonly")
+        exit(-1)
+
+    if sys.argv[1] == "--use-fp16":
+        config = QwenConfig()
+    elif sys.argv[1] == "--use-int8-weightonly":
+        config = QwenConfigWeightOnlyInt8()
+    elif sys.argv[1] == "--use-int4-weightonly":
+        config = QwenConfigWeightOnlyInt4()
+    else:
+        print("Usage: python build.py --use-fp16/--use-int8-weightonly/--use-int4-weightonly")
+        exit(-1)
+    
     logger.set_level(config.log_level)
     tik = time.time()
     if config.parallel_build and config.world_size > 1 and \

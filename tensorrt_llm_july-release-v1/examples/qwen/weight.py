@@ -123,19 +123,8 @@ def load_from_hf_qwen(tensorrt_llm_qwen,
                     split_v = split(v, tensor_parallel, rank, dim=1)
                     split_v = split_v.reshape(3 * (q_emb // tensor_parallel))
                 
-                if use_weight_only:
-                    print("Not supported weight only with bias!")
-                    continue
-                    # v = np.ascontiguousarray(split_v.transpose())
-                    # processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
-                    #     torch.tensor(v), plugin_weight_only_quant_type)
-                    # # workaround for trt not supporting int8 inputs in plugins currently
-                    # dst.value = processed_torch_weights.view(
-                    #     dtype=torch.float32).numpy()
-                    # scales = tensorrt_llm_qwen.layers[idx].attn.qkv.per_channel_scale
-                    # scales.value = torch_weight_scales.numpy()
-                else:
-                    dst.value = np.ascontiguousarray(split_v)
+                # bias don't care about use_weight_only:
+                dst.value = np.ascontiguousarray(split_v)
             elif 'attn.c_proj.weight' in k:
                 dst = tensorrt_llm_qwen.layers[idx].attn.dense.weight
                 split_v = split(v, tensor_parallel, rank, dim=1)
@@ -155,10 +144,8 @@ def load_from_hf_qwen(tensorrt_llm_qwen,
                 dst = tensorrt_llm_qwen.layers[idx].attn.dense.bias
                 v = np.zeros(v.shape[:-1], dtype=dtype)
                 split_v = split(v, tensor_parallel, rank, dim=1)
-                if use_weight_only:
-                    assert False
-                else:
-                    dst.value = np.ascontiguousarray(split_v)
+                # bias don't care about use_weight_only:
+                dst.value = np.ascontiguousarray(split_v)
             elif 'mlp.w1.weight' in k:
                 dst = tensorrt_llm_qwen.layers[idx].mlp.w1.weight
                 split_v = split(v, tensor_parallel, rank, dim=0)
