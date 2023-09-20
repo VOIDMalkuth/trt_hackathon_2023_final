@@ -1,14 +1,14 @@
-### 总述
+### TRT-LLM Qwen-7B
 
 本工作是 [NVIDIA TensorRT Hackathon 2023](https://github.com/NVIDIA/trt-samples-for-hackathon-cn/tree/master/Hackathon2023) 的参赛题目，具体选题内容为 2+4 ，即用TensorRT-LLM实现新模型，并在本模型上启用现有feature或添加新feature。
 
 本工作选用[Qwen-7B](https://github.com/QwenLM/Qwen-7B)模型作为待实现的新模型，通义千问-7B（Qwen-7B） 是阿里云研发的通义千问大模型系列的70亿参数规模的模型。Qwen-7B是基于Transformer的大语言模型, 在超大规模的预训练数据上进行训练得到，在Qwen-7B的基础上，还使用对齐机制打造了基于大语言模型的AI助手Qwen-7B-Chat。Qwen-7B支持8k的token长度，在多个全面评估自然语言理解与生成、数学运算解题、代码生成等能力的评测数据集上，均超出了同规模大语言模型的表现。
 
-<!--
+本工作将Qwen-7B模型移植至TensorRT LLM框架中，并开启了Int8和Int4的权重量化，在fp16精度下，相较启用了fast-attention的原版Qwen-7B transformers实现**1.946x**加速，Rouge精度相差在合理范围内；在int8权重量化下，相较启用了fast-attention的原版Qwen-7B transformers实现**2.754x**加速，Rouge精度相差在合理范围内；在int4量化下，实现**2.334x**加速，Rouge精度有一定损失，但速度、内存占用和引擎大小均大幅缩减，详细数据请参见优化效果部分。
 
-- 优化效果（例如给出精度和加速比），简单给出关键的数字即可，在这里不必详细展开
-- 在Docker里面代码编译、运行步骤的完整说明
-  - 请做到只要逐行运行你给的命令，就能把代码跑起来
+具体模型构建和测试复现代码，请参考`tensorrt_llm_july-release-v1/examples/qwen/README.md`完成构建和运行
+
+<!--
 
 ### 主要开发工作
 
@@ -28,24 +28,65 @@
 - 最好能介绍为什么需要某个特别步骤，通过这个特别步骤解决了什么问题
   - 比如，通过Nsight Systems绘制timeline做了性能分析，发现attention时间占比高且有优化空间（贴图展示分析过程），所以决定要写plugin。然后介绍plugin的设计与实现，并在timeline上显示attention这一部分的性能改进。
 
+-->
+
 ### 优化效果
 
 这一部分介绍你的工作在云主机上的运行效果。如果是优化模型，需要分两部分说明：
 
-- 精度：报告与原始模型进行精度对比测试的结果，验证精度达标。
-  - 如果选用TensorRT-LLM，请跑summarize任务并使用 [Rouge](https://huggingface.co/spaces/evaluate-metric/rouge) 来对比模型优化前后的精度差距。如果精度良好，原始模型与优化模型的Rouge score的差异一般在1以内。例子见 TensorRT-LLM docker 中 /root/workspace/tensorrt_llm_july-release-v1/examples/gpt/summarize.py
-  - 如果选用TensorRT，这里的精度测试指的是针对“原始模型”和“TensorRT优化模型”分别输出的数据（tensor）进行数值比较。请给出绝对误差和相对误差的统计结果（至少包括最大值、平均值与中位数）。
-    - 使用训练好的权重和有意义的输入数据更有说服力。如果选手使用了随机权重和输入数据，请在这里注明。
-    - 在精度损失较大的情况下，鼓励选手用训练好的权重和测试数据集对模型优化前与优化后的准确度指标做全面比较，以增强说服力。
-- 性能：例如可以用图表展示不同batch size或sequence length下性能加速效果（考虑到可能模型可能比较大，可以只给batch size为1的数据）
-  - 一般用原始模型作为baseline
-  - 一般提供模型推理时间的加速比即可；若能提供压力测试下的吞吐提升则更好。
+#### 实验环境
 
-请注意：
+#### 性能及精度指标
 
-- 相关测试代码也需要包含在代码仓库中，可被复现。
-- 请写明云主机的软件硬件环境，方便他人参考。
+在CNN Dailymail数据集上完成Summarize任务并使用 [Rouge](https://huggingface.co/spaces/evaluate-metric/rouge) 来对比模型优化前后的精度差距。
 
+hf原版实现CNN Dailymail数据集上的Summary任务指标
+
+```
+[09/19/2023-16:28:24] [TRT-LLM] [I] Hugging Face (total latency: 63.0036199092865 sec)
+[09/19/2023-16:28:24] [TRT-LLM] [I] HF beam 0 result
+[09/19/2023-16:28:24] [TRT-LLM] [I]   rouge1 : 23.542276175618408
+[09/19/2023-16:28:24] [TRT-LLM] [I]   rouge2 : 8.298578499008089
+[09/19/2023-16:28:24] [TRT-LLM] [I]   rougeL : 18.020127809419513
+[09/19/2023-16:28:24] [TRT-LLM] [I]   rougeLsum : 19.067740468195073
+```
+
+trt llm在CNN Dailymail数据集上的Summary任务指标，采用FP16精度，对应加速比为1.946x，精度误差在合理范围内，GPU显存占用20.249GB，引擎大小16.0GB
+
+```
+[09/19/2023-16:35:33] [TRT-LLM] [I] TensorRT-LLM (total latency: 32.374117851257324 sec)
+[09/19/2023-16:35:33] [TRT-LLM] [I] TensorRT-LLM beam 0 result
+[09/19/2023-16:35:33] [TRT-LLM] [I]   rouge1 : 25.43300079943117
+[09/19/2023-16:35:33] [TRT-LLM] [I]   rouge2 : 9.06443649019336
+[09/19/2023-16:35:33] [TRT-LLM] [I]   rougeL : 19.480772591016652
+[09/19/2023-16:35:33] [TRT-LLM] [I]   rougeLsum : 20.84898295493978
+```
+
+trt llm在CNN Dailymail数据集上的Summary任务指标，采用Int8 WeightOnly量化，对应加速比为2.754x，精度误差在合理范围内，运行时显存占用13.557GB，引擎大小8.4GB
+
+```
+[09/20/2023-06:44:54] [TRT-LLM] [I] TensorRT-LLM (total latency: 22.8713800907135 sec)
+[09/20/2023-06:44:54] [TRT-LLM] [I] TensorRT-LLM beam 0 result
+[09/20/2023-06:44:55] [TRT-LLM] [I]   rouge1 : 23.90645420218702
+[09/20/2023-06:44:55] [TRT-LLM] [I]   rouge2 : 7.891516095599542
+[09/20/2023-06:44:55] [TRT-LLM] [I]   rougeL : 17.593275690274655
+[09/20/2023-06:44:55] [TRT-LLM] [I]   rougeLsum : 19.91946017932637
+```
+
+trt llm在CNN Dailymail数据集上的Summary任务指标，采用Int4 WeightOnly量化，对应加速比为，精度存在一定误差，运行时显存占用10.542GB，引擎大小5.4GB
+
+```
+[09/20/2023-07:02:53] [TRT-LLM] [I] TensorRT-LLM (total latency: 26.977251052856445 sec)
+[09/20/2023-07:02:53] [TRT-LLM] [I] TensorRT-LLM beam 0 result
+[09/20/2023-07:02:53] [TRT-LLM] [I]   rouge1 : 23.70251298379219
+[09/20/2023-07:02:53] [TRT-LLM] [I]   rouge2 : 7.016004368646156
+[09/20/2023-07:02:53] [TRT-LLM] [I]   rougeL : 18.027980286289
+[09/20/2023-07:02:53] [TRT-LLM] [I]   rougeLsum : 21.013849142346537
+```
+
+相关测试代码均包含在本仓库中。
+
+<!--
 ### Bug报告（可选）
 
 提交bug是对TensorRT/TensorRT-LLM的另一种贡献。发现的TensorRT/TensorRT-LLM或cookbook、或文档和教程相关bug，请提交到[github issues](https://github.com/NVIDIA/trt-samples-for-hackathon-cn/issues)，并请在这里给出链接。  
