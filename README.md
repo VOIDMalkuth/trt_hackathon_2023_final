@@ -1,4 +1,4 @@
-### TRT-LLM Qwen-7B
+# TRT-LLM Qwen-7B
 
 本工作是 [NVIDIA TensorRT Hackathon 2023](https://github.com/NVIDIA/trt-samples-for-hackathon-cn/tree/master/Hackathon2023) 的参赛题目，具体选题内容为 2+4 ，即用TensorRT-LLM实现新模型，并在本模型上启用现有feature或添加新feature。
 
@@ -8,35 +8,162 @@
 
 具体模型构建和测试复现代码，请参考`tensorrt_llm_july-release-v1/examples/qwen/README.md`完成构建和运行
 
-<!--
+## 主要开发工作
 
-### 主要开发工作
+### 开发工作的难点
 
-#### 开发工作的难点
+本工作将Qwen-7B模型移植至TensorRT LLM框架中，并开启了Int8和Int4的权重量化。
 
-请在这一节里总结你的工作难点与亮点。
-- 如果使用 TensorRT 进行优化，请介绍一下在模型在导出时、或用polygraphy/trtexec解析时，或在使用TensorRT中，遇到了什么问题并解决了。换句话说，针对这个模型，我们为什么需要额外的工程手段。
-- 如果使用 TensorRT-LLM 进行优化，描述以下方面可供选手参考：如果搭建了新模型， 请介绍模型结构有无特别之处，在模型的搭建过程中使用了什么算子，有没有通过plugin支持的新算子。如果支持新feature，请介绍这个feature具体需要修改哪些模块才能实现。如果优化已有模型，请介绍模型性能瓶颈以及解决方法。另外还可以包含工程实现以及debug过程中的难点。
+该模型结构本身属于Decoder Only的大语言模型，TRT-LLM对其支持较好。Decoder Only的大语言模型具体结构都均为相似，区别主要在于Attention的细节和前后的MLP、Positional Embedding等。工程的核心难点在于从原始的Python文件中提取网络结构并将其对应到TRT-LLM的层中，如Rotary Embedding的实现在Qwen代码中是手动添加的，而在TRT-LLM中则与其他Attention一起通过GPT-Attention插件完成融合，此外，Qwen的Attention权重在qkv模块上有bias，而proj模块上则没有bias，TRT-LLM的Attention层则只能一并设置两者，因此需要从权重上进行处理实现等价计算。
 
-### 开发与优化过程
+工程实现过程中，使用了Debug功能来逐层分析比对输出误差，定位问题。同时在load权重时添加根据量化类型修改权重的功能，完成int8和int4精度下的weightonly的量化。
 
-这一部分是报告的主体。请把自己假定为老师，为 TensorRT 或 TensorRT-LLM 的初学者讲述如何从原始模型出发，经过一系列开发步骤，得到优化后的 TensorRT 或 TensorRT-LLM 模型。或者你是如何一步步通过修改哪些模块添加了新feature的。
+## 开发与优化过程
 
-建议：
+开发时，从原始的Qwen Python实现出发，逐步完成模型构建、引擎构建、引擎执行等过程。
 
-- 分步骤讲清楚开发过程
-- 最好能介绍为什么需要某个特别步骤，通过这个特别步骤解决了什么问题
-  - 比如，通过Nsight Systems绘制timeline做了性能分析，发现attention时间占比高且有优化空间（贴图展示分析过程），所以决定要写plugin。然后介绍plugin的设计与实现，并在timeline上显示attention这一部分的性能改进。
+### 模型构建
 
--->
+首先需要确认原始模型的结构。原始模型属于Decoder Only的大语言模型，整体结构分为embedding，循环的transformer块以及最后的head。其中循环的transformer块主要包括attention结构，其前后的Normlization函数以及mlp模型。此处列出一些可供参考的资料：关于Transformer结构的信息可以参考视频[https://www.youtube.com/watch?v=bCz4OMemCcA](https://www.youtube.com/watch?v=bCz4OMemCcA)，关于以llama为例的大语言模型里修改后的Transformer结构的信息可以参考视频[https://www.youtube.com/watch?v=Mn_9W1nCFLo](https://www.youtube.com/watch?v=Mn_9W1nCFLo)。下面的内容默认读者已经了解大语言模型中一些常见的技术和名词。
 
-### 优化效果
+Qwen的模型整体和以llama为代表的大语言模型比较类似，其Normlization函数使用RmsNorm，而Attention的Positional Embedding采用Rotary Positional Embedding。Qwen的Attention模块在qkv部分上有bias，而proj部分上则没有bias。
 
-这一部分介绍你的工作在云主机上的运行效果。如果是优化模型，需要分两部分说明：
+TRT-LLM提供了大量工具帮助我们构建。在`tensorrt_llm_july-release-v1/tensorrt_llm/layers`目录中，包含了和torch中`nn.Module`类似的大语言模型中常用的TRT-LLM模块，而`tensorrt_llm_july-release-v1/tensorrt_llm/functional.py`文件中提供了类似`nn.functional`的函数式接口。
 
-#### 实验环境
+#### 代码对代码翻译
 
-#### 性能及精度指标
+首先以`QwenMLP`为例，介绍基础的代码对代码的模型搭建方法，原始的`QwenMLP`代码如下
+
+```py
+class QWenMLP(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.w1 = nn.Linear(
+            config.hidden_size, config.intermediate_size // 2, bias=not config.no_bias
+        )
+        self.w2 = nn.Linear(
+            config.hidden_size, config.intermediate_size // 2, bias=not config.no_bias
+        )
+        ff_dim_in = config.intermediate_size // 2
+        self.c_proj = nn.Linear(ff_dim_in, config.hidden_size, bias=not config.no_bias)
+
+    def forward(self, hidden_states):
+        a1 = self.w1(hidden_states)
+        a2 = self.w2(hidden_states)
+        intermediate_parallel = a1 * F.silu(a2)
+        output = self.c_proj(intermediate_parallel)
+        return output
+```
+
+可以看到其中由3个线性层组成，而TRT-LLM中包含`ColumnLinear`这一可用于多卡并行环境的线性层，不难写出对应的TRT-LLM Module
+
+```py
+class QwenMLP(Module):
+    def __init__(self,
+                 hidden_size,
+                 intermediate_size,
+                 bias=False,
+                 dtype=None,
+                 tp_group=None,
+                 tp_size=1):
+        super().__init__()
+        self.w1 = ColumnLinear(hidden_size,
+                               intermediate_size // 2,
+                               bias=bias,
+                               dtype=dtype,
+                               tp_group=tp_group,
+                               tp_size=tp_size)
+        self.w2 = ColumnLinear(hidden_size,
+                               intermediate_size // 2,
+                               bias=bias,
+                               dtype=dtype,
+                               tp_group=tp_group,
+                               tp_size=tp_size)
+        self.c_proj = ColumnLinear(intermediate_size // 2,
+                                   hidden_size,
+                                   bias=bias,
+                                   dtype=dtype,
+                                   tp_group=tp_group,
+                                   tp_size=tp_size)
+
+    def forward(self, hidden_states):
+        a1 = self.w1(hidden_states)
+        a2 = self.w2(hidden_states)
+        intermediate_parallel = a1 * silu(a2)
+        output = self.c_proj(intermediate_parallel)
+        return output
+```
+
+#### 模块对模块的移植
+
+同一功能有很多实现方法，这些实现方法相当复杂，可以考虑不用在代码层面上对齐而是在功能层面上对齐对于QwenAttention模块，注意到其功能较为复杂。但是经过查阅Qwen的[技术文档](https://github.com/QwenLM/Qwen-7B/blob/main/tech_memo.md)，以及观察原始代码中对Flash Attention的调用，可以确定其完成的Attention内部并没有进行特殊处理，可以直接使用TRT-LLM的Attention替换。此时，需要确定对应的调用参数，这就需要熟读两个框架对应的代码，确定其语义具体的选项。Qwen模型的一些配置也可以在`tensorrt_llm_july-release-v1/examples/qwen/Qwen-7B/config.json`中找到。
+
+模块对模块的移植要编写的代码量很少，也能更好利用TRT-LLM提供的高效实现。但却要求对代码有更高的掌握，如上文提到的QwenAttention模块，在具体移植时还涉及模型外部Positional Embedding与Attention的交互，而TRT-LLM中这些交互在Attention内部完成，相应代码也需要加以修改。
+
+移植完成后，将模型文件放到`tensorrt_llm_july-release-v1/tensorrt_llm/models/qwen`文件夹中，并在相关`__init__.py`中完成import，即可在python中调用相关函数。
+
+note: 注意pip默认会将python文件安装到自己的目录下，所以在源代码中修改完之后需要重新安装，或者也可以使用develop安装方式`pip install -e`
+
+### 引擎构建
+
+引擎构建时，需要从加载模型文件，加载对应的权重，配置相关选项，并最终调用TRT-LLM构建生成引擎文件。这部分内容可以参考`tensorrt_llm_july-release-v1/examples/qwen/build.py`
+
+TRT-LLM针对多卡场景进行优化，允许多个线程加载引擎并合作推理，这部分操作主要在权重加载时完成。此外，TRT-LLM支持Int8和Int4 WeighOnly的量化，同样需要在加载权重时完成，这部分内容可以参考`tensorrt_llm_july-release-v1/examples/qwen/build.py`
+
+具体的权重加载过程涉及找到HF权重对应的TRT-LLM模型Parameter，并且针对多卡推理和量化对权重加以处理。以Attention模块为例，HF权重包括`attn.c_attn.weight`，`attn.c_attn.bias`和`attn.c_proj.weight`，对应的时模型的`attention.qkv.weight`，`attention.qkv.bias`和`attention.dense.weight`，使用以下代码完成赋值
+
+```py
+dst = tensorrt_llm_qwen.layers[idx].attn.qkv.weight
+dst.value = np.ascontiguousarray(split_v)
+```
+
+对多卡的支持则是通过对权重分割完成的，以Attention模块为例，按`tensor_parallel`对权重进行划分
+
+```py
+q_emb = v.shape[0] // 3
+model_emb = v.shape[1]
+v = v.reshape(3, q_emb, model_emb)
+split_v = split(v, tensor_parallel, rank, dim=1)
+split_v = split_v.reshape(3 * (q_emb // tensor_parallel), model_emb)
+```
+
+对量化的支持则是调用了`torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix`进行了逐通道的对称量化，并设置了量化后权重和scale，以Attention模块为例
+
+```py
+if use_weight_only:
+    v = np.ascontiguousarray(split_v.transpose())
+    processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
+        torch.tensor(v), plugin_weight_only_quant_type)
+    # workaround for trt not supporting int8 inputs in plugins currently
+    dst.value = processed_torch_weights.view(
+        dtype=torch.float32).numpy()
+    scales = tensorrt_llm_qwen.layers[idx].attn.qkv.per_channel_scale
+    scales.value = torch_weight_scales.numpy()
+else:
+    dst.value = np.ascontiguousarray(split_v)
+```
+
+注意，对于未设置的Parameter，TRT-LLM可能会用未初始化的空间进行计算，因此对于Qwen模型Attention中没有bias的部分手动设置bias为0
+
+### 引擎执行
+
+可以参考`tensorrt_llm_july-release-v1/examples/qwen/run.py`和`tensorrt_llm_july-release-v1/examples/qwen/summarize.py`
+
+Qwen模型使用了自己独特的Tokenizer，所以需要在Python中加载Tokernizer并完成Tokernize过程。此后设置好`ModelConfig`和`SamplingConfig`，读取序列化后的引擎，即可使用`tensorrt_llm.runtime.GenerationSession`接口创建一个推理Session，此后调用`decode`函数即可启动推理
+
+## 优化效果
+
+### 实验环境
+
+- 阿里云虚拟机环境
+- CPU: Intel(R) Xeon(R) Platinum 8369B CPU @ 2.90GHz 16核心
+- GPU: NVIDIA A10 GPU 24GB
+- 内存：64GB
+- 操作系统: Ubuntu 20.04.5 LTS
+- CUDA版本: 12.1
+- CUDA驱动版本: 525.105.17
+
+### 性能及精度指标
 
 在CNN Dailymail数据集上完成Summarize任务并使用 [Rouge](https://huggingface.co/spaces/evaluate-metric/rouge) 来对比模型优化前后的精度差距。
 
@@ -73,7 +200,7 @@ trt llm在CNN Dailymail数据集上的Summary任务指标，采用Int8 WeightOnl
 [09/20/2023-06:44:55] [TRT-LLM] [I]   rougeLsum : 19.91946017932637
 ```
 
-trt llm在CNN Dailymail数据集上的Summary任务指标，采用Int4 WeightOnly量化，对应加速比为，精度存在一定误差，运行时显存占用10.542GB，引擎大小5.4GB
+trt llm在CNN Dailymail数据集上的Summary任务指标，采用Int4 WeightOnly量化，对应加速比为2.334x，精度存在一定误差，运行时显存占用10.542GB，引擎大小5.4GB
 
 ```
 [09/20/2023-07:02:53] [TRT-LLM] [I] TensorRT-LLM (total latency: 26.977251052856445 sec)
