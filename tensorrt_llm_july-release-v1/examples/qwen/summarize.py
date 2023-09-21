@@ -259,6 +259,8 @@ def main(args):
 
     ite_count = 0
     data_point_idx = 0
+    trt_llm_tokens_cnt = 0
+    hf_tokens_cnt = 0
     while (data_point_idx < len(dataset_cnn['test'])) and (ite_count <
                                                            args.max_ite):
         if runtime_rank == 0:
@@ -273,11 +275,13 @@ def main(args):
             summary_tensorrt_llm, tokens_tensorrt_llm = summarize_tensorrt_llm(
                 datapoint)
             profiler.stop('tensorrt_llm')
+            trt_llm_tokens_cnt += len(list(filter(lambda x : x != end_id, tokens_tensorrt_llm[0][0])))
 
         if test_hf:
             profiler.start('hf')
             summary_hf, tokens_hf = summarize_hf(datapoint)
             profiler.stop('hf')
+            hf_tokens_cnt += len(list(filter(lambda x : x != end_id, tokens_hf[0])))
 
         if runtime_rank == 0:
             if test_trt_llm:
@@ -324,6 +328,7 @@ def main(args):
                 if args.check_accuracy and beam_idx == 0:
                     assert computed_metrics_tensorrt_llm['rouge1'].mid[
                         2] * 100 > args.tensorrt_llm_rouge1_threshold
+            print("trt_llm_tokens_cnt:", trt_llm_tokens_cnt)
         if test_hf:
             np.random.seed(0)  # rouge score use sampling to compute the score
             logger.info(
@@ -335,6 +340,7 @@ def main(args):
                 for key in computed_metrics_hf.keys():
                     logger.info(
                         f'  {key} : {computed_metrics_hf[key].mid[2]*100}')
+            print("hf_tokens_cnt:", hf_tokens_cnt)
 
 
 if __name__ == '__main__':

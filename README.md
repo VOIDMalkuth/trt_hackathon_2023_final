@@ -213,6 +213,27 @@ trt llm在CNN Dailymail数据集上的Summary任务指标，采用Int4 WeightOnl
 
 相关测试代码均包含在本仓库中。
 
+#### 测试结果分析
+
+从测试结果中我们发现，int4 weightonly量化的性能并不如int8。从int4到int8 weightonly量化的性能收益是减少了一半的Global Mem读取，性能开销则来自于因为没有int4计算硬件带来的转换开销。虽然如此，在我们启用了KV-Cache的情况下，大语言模型的推理任务应当是Memory Bound为主导，不应该出现这样的性能下降，因此我们使用Nsight System进行分析。
+
+![int8_inference_round_time](./pics/int8_inference_round_time.png)
+
+![int4_inference_round_time](./pics/int4_inference_round_time.png)
+
+可以看到如图所示，在单个Token的推理过程中，int4 weightonly量化的性能(10.933ms)其实高于int8 weightonly量化(16.991ms)，也就是说，性能的差距并不在这里。综合考虑之下，其性能差距很可能是来源于推理次数，而不是推理轮数的增加。
+
+修改Python代码，统计各种推理方案下输出Token数，结果如下：
+
+- hf原版输出长度：1463
+- fp16精度输出长度：797
+- int8量化后输出长度：932
+- int4量化后输出长度：1706
+
+通过上述统计以及对输出的分析，可以发现int4量化后模型不能很好的总结相应内容，会输出一些无意义token，模型的能力受到了量化较大影响，模型输出长度增加，迭代轮数增多，导致最终性能反而下降。
+
+受限于时间因素，我们没能很好地解决这一问题，这一问题可以从两个方面入手解决。一方面可以使用smooth quant等技术降低量化地难度，另一方面也可以通过使用PTQ或直接使用裁剪好的int4参数。Qwen7B基座模型本身没有int4权重，但其chat版本Qwen-7B-chat提供了一个int4版本的权重。然而Qwen7B模型目前暂时从HuggingFace下线，我们没有来得及尝试使用这些方案。此外，在原生支持int4计算的设备上，单轮推理性能提升的收益可能能超过其导致的模型能力下降带来的迭代数增加的损失。
+
 ### 送分题答案
 
 1. 请在报告中写出 /root/workspace/tensorrt_llm_july-release-v1/examples/gpt/README 里面 “Single node, single GPU” 部分如下命令的输出（10分）模型为gpt2-medium
