@@ -213,34 +213,33 @@ trt llm在CNN Dailymail数据集上的Summary任务指标，采用Int4 WeightOnl
 
 相关测试代码均包含在本仓库中。
 
+### 送分题答案
+
+1. 请在报告中写出 /root/workspace/tensorrt_llm_july-release-v1/examples/gpt/README 里面 “Single node, single GPU” 部分如下命令的输出（10分）模型为gpt2-medium
+
+输出结果为：
+
+```
+Input: Born in north-east France, Soyer trained as a
+Output:  chef and eventually became a chef at a
+```
+
+![gpt2_output](./pics/gpt2_output.png)
+
+2. 请在报告中写出 /root/workspace/tensorrt_llm_july-release-v1/examples/gpt/README 里面 “Summarization using the GPT model” 部分如下命令的rouge 分数（10分）模型为gpt2-medium
+
+Rogue分数为：
+
+```
+[09/11/2023-06:01:32] [TRT-LLM] [I]   rouge1 : 21.869322054781037
+[09/11/2023-06:01:32] [TRT-LLM] [I]   rouge2 : 6.258925475911645
+[09/11/2023-06:01:32] [TRT-LLM] [I]   rougeL : 16.755771650012953
+[09/11/2023-06:01:32] [TRT-LLM] [I]   rougeLsum : 18.68034777724496
+```
+
+![gpt2_trt_llm_summarize_output](./pics/gpt2_trt_llm_summarize_output.png)
+
 <!--
-### Bug报告（可选）
-
-提交bug是对TensorRT/TensorRT-LLM的另一种贡献。发现的TensorRT/TensorRT-LLM或cookbook、或文档和教程相关bug，请提交到[github issues](https://github.com/NVIDIA/trt-samples-for-hackathon-cn/issues)，并请在这里给出链接。  
-
-对于每个bug，请标记上hackathon2023标签，并写好正文：
-
-- 对于cookbook或文档和教程相关bug，说清楚问题即可，不必很详细。
-- 对于TensorRT bug，首先确认在云主机上使用NGC docker + TensorRT 9.0.0.1可复现。
-- 然后填写如下模板，并请导师复核确认（前面“评分标准”已经提到，确认有效可得附加分）：
-  - Environment
-    - TensorRT 9.0.0.1
-    - Versions of CUDA, CUBLAS, CuDNN used
-    - Container used
-    - NVIDIA driver version
-  - Reproduction Steps
-    - Provide detailed reproduction steps for the issue here, including any commands run on the command line.
-  - Expected Behavior
-    - Provide a brief summary of the expected behavior of the software. Provide output files or examples if possible.
-  - Actual Behavior
-    - Describe the actual behavior of the software and how it deviates from the expected behavior. Provide output files or examples if possible.
-  - Additional Notes
-    - Provide any additional context here you think might be useful for the TensorRT team to help debug this issue (such as experiments done, potential things to investigate).
-
-### 送分题答案（可选）
-
-如果你做了送分题，请把答案写在这里。
-
 ### 经验与体会（可选）
 
 欢迎在这里总结经验，抒发感慨。
